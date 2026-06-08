@@ -3,9 +3,25 @@
 
 from __future__ import annotations
 
-import sys
-import subprocess
 import os
+import sys
+
+# Set CPU thread limits for backend numeric and ML libraries to avoid OpenMP deadlocks on macOS
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+import warnings
+warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
+try:
+    import pandas as pd
+    warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
+except Exception:
+    pass
+
+import subprocess
 from pathlib import Path
 
 def bootstrap():
@@ -178,6 +194,23 @@ class SleepScoringApp:
         if algorithm:
             self.status.set(f"{algorithm.label}: {algorithm.description}")
 
+    def _bind_scroll(self, widget: tk.Widget, canvas: tk.Canvas) -> None:
+        def _on_mousewheel(event):
+            if event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+            else:
+                if sys.platform == "darwin":
+                    canvas.yview_scroll(int(-1 * event.delta), "units")
+                else:
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        if sys.platform == "linux":
+            widget.bind("<Button-4>", _on_mousewheel, add="+")
+            widget.bind("<Button-5>", _on_mousewheel, add="+")
+        else:
+            widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+
     def _scrollable_group(self, parent: ttk.PanedWindow, title: str) -> ttk.Frame:
         outer = ttk.Frame(parent, padding=8)
         parent.add(outer, weight=1)
@@ -188,8 +221,11 @@ class SleepScoringApp:
         inner.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._bind_scroll(canvas, canvas)
+        self._bind_scroll(inner, canvas)
+        inner.canvas_ref = canvas
         return inner
 
     def browse_file(self) -> None:
@@ -249,22 +285,30 @@ class SleepScoringApp:
         for channel in channels:
             eeg_var = tk.BooleanVar(value=channel in guessed_eeg)
             self.channel_vars[channel] = eeg_var
-            ttk.Checkbutton(self.eeg_frame, text=channel, variable=eeg_var).pack(anchor="w")
+            btn = ttk.Checkbutton(self.eeg_frame, text=channel, variable=eeg_var)
+            btn.pack(anchor="w")
+            self._bind_scroll(btn, self.eeg_frame.canvas_ref)
 
             if channel in guesses.ref:
                 ref_var = tk.BooleanVar(value=channel in guessed_ref)
                 self.ref_vars[channel] = ref_var
-                ttk.Checkbutton(self.ref_frame, text=channel, variable=ref_var).pack(anchor="w")
+                btn = ttk.Checkbutton(self.ref_frame, text=channel, variable=ref_var)
+                btn.pack(anchor="w")
+                self._bind_scroll(btn, self.ref_frame.canvas_ref)
 
             if channel in guesses.eog:
                 eog_var = tk.BooleanVar(value=channel in guessed_eog)
                 self.eog_vars[channel] = eog_var
-                ttk.Checkbutton(self.aux_frame, text=f"EOG: {channel}", variable=eog_var).pack(anchor="w")
+                btn = ttk.Checkbutton(self.aux_frame, text=f"EOG: {channel}", variable=eog_var)
+                btn.pack(anchor="w")
+                self._bind_scroll(btn, self.aux_frame.canvas_ref)
 
             if channel in guesses.emg:
                 emg_var = tk.BooleanVar(value=channel in guessed_emg)
                 self.emg_vars[channel] = emg_var
-                ttk.Checkbutton(self.aux_frame, text=f"EMG: {channel}", variable=emg_var).pack(anchor="w")
+                btn = ttk.Checkbutton(self.aux_frame, text=f"EMG: {channel}", variable=emg_var)
+                btn.pack(anchor="w")
+                self._bind_scroll(btn, self.aux_frame.canvas_ref)
 
         file_desc = f"{len(files)} files | " if len(files) > 1 else ""
         self.status.set(

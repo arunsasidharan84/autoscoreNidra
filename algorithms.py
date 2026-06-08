@@ -11,14 +11,31 @@ the selected base algorithm as the final sequence-correction stage.
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import shutil
 import sys
+
+# Set CPU thread limits for backend numeric and ML libraries to avoid OpenMP deadlocks on macOS
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+import importlib.util
+import shutil
 import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Sequence
+
+warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
+try:
+    import pandas as pd
+    warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
+except Exception:
+    pass
+
+
 
 try:
     from .scorer import (
@@ -170,6 +187,7 @@ class LocalTorchEpochAlgorithm(SleepScoringAlgorithm):
 
     def _device(self):
         import torch
+        torch.set_num_threads(1)
 
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -405,6 +423,7 @@ class USleepAlgorithm(SleepScoringAlgorithm):
 
     def _device(self):
         import torch
+        torch.set_num_threads(1)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if os.getenv("AUTO_SLEEP_USE_MPS") == "1":
