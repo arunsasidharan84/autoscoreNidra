@@ -2,6 +2,27 @@
 
 autoscoreNidra is a cross-platform desktop application for automated sleep staging from EEG recordings. It uses modern deep learning and machine learning models to score sleep stages and applies language model sequence correction.
 
+---
+
+## 📥 Download Pre-built Releases
+
+No local setup of Python, PyTorch, or other runtime dependencies is required. The application is packaged as fully self-contained standalone desktop apps:
+
+*   **macOS (Universal ZIP)**: [Download for macOS](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/ScoringNidra-macos.zip)
+*   **Windows (x64 Installer EXE)**: [Download for Windows](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/ScoringNidra-Installer.exe)
+*   **Linux (x64 Tarball)**: [Download for Linux](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/ScoringNidra-linux.tar.gz)
+
+*(These links always point to the latest pre-built releases compiled automatically via GitHub Actions).*
+
+### For Mac Users
+Because the application is signed ad-hoc, you must clear the macOS Gatekeeper quarantine flag after extracting it:
+1. Open **Terminal** and navigate to your extracted app path.
+2. Run the following command:
+   ```sh
+   xattr -rd com.apple.quarantine ScoringNidra.app
+   ```
+3. Right-click `ScoringNidra.app` and choose **Open**.
+
 ## Architecture
 
 The application is structured into three main layers:
