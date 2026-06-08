@@ -19,7 +19,11 @@ __pycache__/
 
 # Temporary outputs/JSONs
 *.json
+!**/Contents.json
+!backend/models/**/*.json
 *.txt
+!requirements.txt
+!*spectral.txt
 *.edf
 *.lst
 scratch_out/
