@@ -184,6 +184,8 @@ class LocalTorchEpochAlgorithm(SleepScoringAlgorithm):
         sleepgpt_dir = workspace_root / "sleepgpt-main"
         if not sleepgpt_dir.exists():
             sleepgpt_dir = workspace_root / "CCS_SleepEEGAnalysis" / "sleepgpt-main"
+        if not sleepgpt_dir.exists():
+            sleepgpt_dir = workspace_root.parent / "CCS_SleepEEGAnalysis" / "sleepgpt-main"
         return sleepgpt_dir
 
     def _device(self):
@@ -351,32 +353,166 @@ class TinySleepNetAlgorithm(PhysioExSequenceAlgorithm):
     preprocessing = "raw"
 
 
-class DeepSleepNetAlgorithm(LocalTorchEpochAlgorithm):
-    key = "deepsleepnet"
-    label = "DeepSleepNet"
-    description = "DeepSleepNet CNN adapter; set AUTO_SLEEP_DEEPSLEEPNET_WEIGHTS to a compatible checkpoint."
+class GsscAlgorithm(SleepScoringAlgorithm):
+    key = "gssc"
+    label = "Greifswald Sleep Stage Classifier (GSSC)"
+    description = "Automatic sleep stage classifier using GSSC neural networks."
 
     def score(self, raw, eeg_channels, ref_channels, eog_name, emg_name, log):
-        del ref_channels, eog_name, emg_name
-        weights = os.getenv("AUTO_SLEEP_DEEPSLEEPNET_WEIGHTS")
-        if not weights:
+        del emg_name
+        try:
+            import torch
+            import torch.nn as nn
+            from importlib_resources import files
+            from gssc.infer import EEGInfer
+            from gssc.utils import prepare_inst, permute_sigs, epo_arr_zscore, loudest_vote
+        except ImportError as exc:
             raise AlgorithmUnavailable(
-                "DeepSleepNet architecture is implemented, but no compatible pretrained weights were found. "
-                "Set AUTO_SLEEP_DEEPSLEEPNET_WEIGHTS=/path/to/deepsleepnet_state_dict.pth."
-            )
-        sleepgpt_dir = self._sleepgpt_dir()
-        if str(sleepgpt_dir) not in sys.path:
-            sys.path.insert(0, str(sleepgpt_dir))
-        from models.sleepnet import DeepSleepNet
+                "GSSC dependencies are missing. Install them with `pip install gssc`."
+            ) from exc
 
-        model = DeepSleepNet(5, 3000)
-        self._load_state_dict(model, Path(weights))
-        channel_probs = []
-        for channel in eeg_channels:
-            log(f"Running DeepSleepNet on {channel}.")
-            epochs = self._epoch_tensor(raw, channel)
-            channel_probs.append((channel, self._score_tensor_model(model, epochs, log=log)))
-        return self._consensus_from_channel_probs(channel_probs)
+        # Set up referenced EEG channels
+        staged_raw = raw.copy()
+        gssc_eeg_chans = []
+        for eeg in eeg_channels:
+            if ref_channels and not is_prereferenced_channel(eeg):
+                ref = _clinical_reference_for(eeg, ref_channels)
+                if ref is None:
+                    raise ValueError(f"No reference channel available for {eeg}")
+                montage_name = _make_pair_name(eeg, ref)
+                staged_raw = mne.set_bipolar_reference(
+                    staged_raw,
+                    anode=eeg,
+                    cathode=ref,
+                    ch_name=montage_name,
+                    drop_refs=False,
+                    verbose=False,
+                )
+                staged_raw.set_channel_types({montage_name: "eeg"})
+                gssc_eeg_chans.append(montage_name)
+            else:
+                gssc_eeg_chans.append(eeg)
+
+        gssc_eog_chans = [eog_name] if eog_name and eog_name in staged_raw.ch_names else []
+
+        log(f"Running GSSC on EEG channels: {gssc_eeg_chans}, EOG channels: {gssc_eog_chans}")
+
+        # Manually load the models with weights_only=False to support PyTorch 2.6+
+        try:
+            net_name = files('gssc.nets').joinpath("sig_net_v1.pt")
+            net = torch.load(net_name, weights_only=False)
+            con_net_name = files('gssc.nets').joinpath("gru_net_v1.pt")
+            con_net = torch.load(con_net_name, weights_only=False)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load GSSC pre-trained models: {exc}") from exc
+
+        # Force CPU / single-thread settings to avoid deadlocks
+        torch.set_num_threads(1)
+        device = torch.device("cpu") # Keep GSSC on CPU to avoid macOS MPS conflicts/deadlocks with YASA/lightgbm
+        
+        net = net.to(device).eval()
+        con_net = con_net.to(device).eval()
+
+        # Replicate mne_infer with consensus probabilities extraction
+        sig_len = 2560
+        cut = "back"
+
+        # Filter raw data to 0.3 - 30 Hz
+        filter_band = [None, None]
+        if round(staged_raw.info["highpass"], 2) < 0.3:
+            filter_band[0] = 0.3
+        if round(staged_raw.info["lowpass"], 2) > 30.0:
+            filter_band[1] = 30.0
+        if filter_band[0] is not None or filter_band[1] is not None:
+            log(f"Filtering staged raw data for GSSC: {filter_band[0]} - {filter_band[1]} Hz")
+            staged_raw.filter(*filter_band, verbose=False)
+
+        signals = {
+            "eeg": {"chans": gssc_eeg_chans, "drop": True, "flip": False},
+            "eog": {"chans": gssc_eog_chans, "drop": True, "flip": False}
+        }
+
+        epo, start_time = prepare_inst(staged_raw, sig_len, cut)
+        sig_combs, perm_matrix, all_chans, _ = permute_sigs(epo, signals)
+        data = epo.get_data(picks=all_chans) * 1e6
+        data = epo_arr_zscore(data)
+
+        all_sigs = {}
+        for perm_idx in range(len(perm_matrix)):
+            these_chans = {"eeg": None, "eog": None}
+            perm = perm_matrix[perm_idx,]
+            sigs = {}
+            for sig_idx, (sig_name, chans) in enumerate(sig_combs.items()):
+                if not len(chans[perm[sig_idx]]):
+                    continue
+                chan = chans[perm[sig_idx]][0]
+                from gssc.utils import check_flip_chan
+                ch, coef = check_flip_chan(chan)
+                all_chans_idx = all_chans.index(ch)
+                signal = coef * data[:, all_chans_idx, :]
+                sigs[sig_name] = torch.tensor(signal, dtype=torch.float32)
+                these_chans[sig_name] = chan
+            perm_str = "eeg: {}, eog: {}".format(*these_chans.values())
+            all_sigs[perm_str] = sigs
+
+        logits = []
+        perm_names = []
+        for sig_idx, (perm_str, sigs) in enumerate(all_sigs.items()):
+            perm_names.append(perm_str)
+            for k in sigs.keys():
+                sigs[k] = sigs[k].reshape(-1, 1, sigs[k].shape[-1])
+                sigs[k] = torch.FloatTensor(sigs[k][..., :sig_len])
+            
+            with torch.no_grad():
+                hypno_len = len(sigs[list(sigs.keys())[0]])
+                all_reps = []
+                for start in range(0, hypno_len, hypno_len): # run all at once since chunk_n=0
+                    these_sigs = {}
+                    for k in sigs.keys():
+                        these_sigs[k] = sigs[k][start : start + hypno_len].to(device)
+                    reps = net(these_sigs, rep_output="rep_only")
+                    reps = reps.swapaxes(-1, 1)
+                    all_reps.append(reps)
+                reps = torch.cat(all_reps)
+
+                hidden = torch.zeros(10, 1, 256, device=device)
+                y, hidden = con_net(reps, hidden)
+                del reps
+                y = y.float()
+                logits.append(y[:, 0, :].cpu().numpy())
+
+        # loudest_vote to find the best permutation and its logits
+        logits_arr = np.array(logits) # shape (P, E, 5)
+        
+        # We compute the consensus by finding the permutation with minimal entropy per epoch
+        loss_func = nn.NLLLoss(reduction="none")
+        logits_tensor = torch.FloatTensor(logits_arr)
+        entrs = torch.zeros((logits_tensor.shape[0], logits_tensor.shape[1])) # (P, E)
+        for idx in range(len(logits_tensor)):
+            targs = torch.LongTensor(np.argmax(logits_arr[idx], axis=-1))
+            entrs[idx] = loss_func(logits_tensor[idx], targs)
+        
+        min_inds = np.argmin(entrs.numpy(), axis=0) # shape (E,)
+        min_logits = logits_tensor[min_inds, np.arange(logits_tensor.shape[1])] # shape (E, 5)
+        
+        # Softmax to get probabilities
+        consensus_probs_tensor = torch.softmax(min_logits, dim=-1)
+        consensus_df = pd.DataFrame(consensus_probs_tensor.numpy(), columns=STAGE_COLUMNS)
+
+        # Build per-channel probabilities (representing each permutation)
+        per_channel_rows = []
+        for idx, perm_str in enumerate(perm_names):
+            perm_logits = torch.FloatTensor(logits_arr[idx])
+            perm_probs = torch.softmax(perm_logits, dim=-1).numpy()
+            df = pd.DataFrame(perm_probs, columns=STAGE_COLUMNS)
+            df["epoch"] = np.arange(len(df))
+            df["montage"] = perm_str
+            per_channel_rows.append(df)
+        
+        per_channel_df = pd.concat(per_channel_rows, ignore_index=True)
+
+        return consensus_df, per_channel_df, perm_names
+
 
 
 
@@ -670,7 +806,7 @@ def available_algorithms() -> dict[str, SleepScoringAlgorithm]:
         YasaAlgorithm(),
         SleepEEGpyAlgorithm(),
         TinySleepNetAlgorithm(),
-        DeepSleepNetAlgorithm(),
+        GsscAlgorithm(),
         SeqSleepNetAlgorithm(),
         USleepAlgorithm(),
         SleepTransformerAlgorithm(),

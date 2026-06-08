@@ -431,6 +431,8 @@ def run_sleepgpt_correction(
     sleepgpt_dir = workspace_root / "sleepgpt-main"
     if not sleepgpt_dir.exists():
         sleepgpt_dir = workspace_root / "CCS_SleepEEGAnalysis" / "sleepgpt-main"
+    if not sleepgpt_dir.exists():
+        sleepgpt_dir = workspace_root.parent / "CCS_SleepEEGAnalysis" / "sleepgpt-main"
     checkpoint = sleepgpt_dir / "output" / "gpt_shhs_pretrained" / "90_48_3_6.pth.tar"
     model_file = sleepgpt_dir / "models" / "gpt_transformers.py"
 
