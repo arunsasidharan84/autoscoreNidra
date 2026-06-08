@@ -180,6 +180,8 @@ class LocalTorchEpochAlgorithm(SleepScoringAlgorithm):
     checkpoint: Path | None = None
 
     def _sleepgpt_dir(self) -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys._MEIPASS) / "sleepgpt-main"
         workspace_root = Path(__file__).resolve().parents[1]
         sleepgpt_dir = workspace_root / "sleepgpt-main"
         if not sleepgpt_dir.exists():
@@ -399,9 +401,19 @@ class GsscAlgorithm(SleepScoringAlgorithm):
 
         # Manually load the models with weights_only=False to support PyTorch 2.6+
         try:
-            net_name = files('gssc.nets').joinpath("sig_net_v1.pt")
+            try:
+                net_name = files('gssc.nets').joinpath("sig_net_v1.pt")
+                con_net_name = files('gssc.nets').joinpath("gru_net_v1.pt")
+                if not Path(net_name).exists():
+                    raise FileNotFoundError()
+            except Exception:
+                meipass = getattr(sys, "_MEIPASS", None)
+                if meipass:
+                    net_name = Path(meipass) / "gssc" / "nets" / "sig_net_v1.pt"
+                    con_net_name = Path(meipass) / "gssc" / "nets" / "gru_net_v1.pt"
+                else:
+                    raise
             net = torch.load(net_name, weights_only=False)
-            con_net_name = files('gssc.nets').joinpath("gru_net_v1.pt")
             con_net = torch.load(con_net_name, weights_only=False)
         except Exception as exc:
             raise RuntimeError(f"Failed to load GSSC pre-trained models: {exc}") from exc
