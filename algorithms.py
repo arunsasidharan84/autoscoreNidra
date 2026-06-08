@@ -162,7 +162,11 @@ class LocalTorchEpochAlgorithm(SleepScoringAlgorithm):
     checkpoint: Path | None = None
 
     def _sleepgpt_dir(self) -> Path:
-        return Path(__file__).resolve().parents[1] / "sleepgpt-main"
+        workspace_root = Path(__file__).resolve().parents[1]
+        sleepgpt_dir = workspace_root / "sleepgpt-main"
+        if not sleepgpt_dir.exists():
+            sleepgpt_dir = workspace_root / "CCS_SleepEEGAnalysis" / "sleepgpt-main"
+        return sleepgpt_dir
 
     def _device(self):
         import torch
