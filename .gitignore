@@ -24,6 +24,7 @@ __pycache__/
 *.txt
 !requirements.txt
 !*spectral.txt
+!**/CMakeLists.txt
 *.edf
 *.lst
 scratch_out/
