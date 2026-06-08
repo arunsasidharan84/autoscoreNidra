@@ -362,6 +362,7 @@ class SleepScoringApp:
         emg: list[str],
     ) -> None:
         import sys
+        import time
 
         cli_path = Path(__file__).resolve().parent / "cli.py"
 
@@ -372,6 +373,7 @@ class SleepScoringApp:
                 self._log(f"\n==================================================")
                 self._log(f"Processing file {index} of {len(files)}: {Path(file_path).name}")
                 self._log(f"==================================================")
+                file_start = time.perf_counter()
                 
                 cmd = [
                     sys.executable,
@@ -408,10 +410,11 @@ class SleepScoringApp:
                         self._log(line)
                 
                 process.wait()
+                file_duration = time.perf_counter() - file_start
                 if process.returncode != 0:
-                    self._log(f"Subprocess failed for {Path(file_path).name} with exit status {process.returncode}.")
+                    self._log(f"Subprocess failed for {Path(file_path).name} with exit status {process.returncode} (duration: {file_duration:.1f}s).")
                 else:
-                    self._log(f"Successfully scored {Path(file_path).name}.")
+                    self._log(f"Successfully scored {Path(file_path).name} (duration: {file_duration:.1f}s).")
 
             self._log("\nBatch scoring completed.")
             self.status.set(f"Completed scoring {len(files)} file(s).")

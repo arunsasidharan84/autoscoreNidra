@@ -461,7 +461,9 @@ def run_sleepgpt_correction(
         model = model.to(device)
         model.eval()
 
-        values = prob[STAGE_COLUMNS].to_numpy(copy=True)
+        # Force columns to numeric and fill any missing values to prevent object type errors (e.g. from Luna POPS)
+        numeric_df = prob[STAGE_COLUMNS].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        values = numeric_df.to_numpy(dtype=np.float32)
         tensor = torch.tensor(values, dtype=torch.float32, device=device)
         total_epochs = len(tensor)
         min_len = 5
