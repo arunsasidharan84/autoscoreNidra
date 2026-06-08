@@ -15,6 +15,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import warnings
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
+warnings.filterwarnings("ignore", message="Using padding='same'")
 try:
     import pandas as pd
     warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
@@ -49,10 +50,10 @@ def main() -> None:
     parser.add_argument("--out-dir", default=None, help="Output directory. Defaults beside the input file.")
     parser.add_argument("--algorithm", choices=sorted(algorithms), default="yasa")
     parser.add_argument("--sequence-correction", choices=["none", "sleepgpt"], default="none")
-    parser.add_argument("--eeg", required=False, help="Comma-separated EEG channels. Auto-guessed if omitted.")
-    parser.add_argument("--ref", default="", help="Optional comma-separated reference channels.")
-    parser.add_argument("--eog", default="", help="Optional comma-separated EOG channels.")
-    parser.add_argument("--emg", default="", help="Optional comma-separated EMG channels.")
+    parser.add_argument("--eeg", default=None, help="Comma-separated EEG channels. Auto-guessed if omitted.")
+    parser.add_argument("--ref", default=None, help="Optional comma-separated reference channels.")
+    parser.add_argument("--eog", default=None, help="Optional comma-separated EOG channels.")
+    parser.add_argument("--emg", default=None, help="Optional comma-separated EMG channels.")
     parser.add_argument("--sleepgpt-alpha", type=float, default=0.1)
     parser.add_argument("--sleepgpt-ngram", type=int, default=30)
     parser.add_argument("--list-channels", action="store_true", help="Print detected channels and exit.")
@@ -72,10 +73,10 @@ def main() -> None:
         print("Guessed EMG:", ", ".join(guesses.emg))
         return
 
-    eeg = parse_csv(args.eeg) or guesses.eeg
-    ref = parse_csv(args.ref)
-    eog = parse_csv(args.eog) or guesses.eog[:2]
-    emg = parse_csv(args.emg) or guesses.emg[:2]
+    eeg = parse_csv(args.eeg) if args.eeg is not None else guesses.eeg
+    ref = parse_csv(args.ref) if args.ref is not None else []
+    eog = parse_csv(args.eog) if args.eog is not None else guesses.eog[:2]
+    emg = parse_csv(args.emg) if args.emg is not None else guesses.emg[:2]
     out_dir = Path(args.out_dir) if args.out_dir else Path(args.data_file).parent
 
     result = score_file(

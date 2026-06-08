@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
+warnings.filterwarnings("ignore", message="Using padding='same'")
 try:
     import pandas as pd
     warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)

@@ -15,6 +15,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import warnings
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
+warnings.filterwarnings("ignore", message="Using padding='same'")
 try:
     import pandas as pd
     warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
@@ -381,17 +382,13 @@ class SleepScoringApp:
                     file_path,
                     "--algorithm", self.algorithm.get(),
                     "--sequence-correction", "sleepgpt" if self.sequence_correction.get() else "none",
+                    "--eeg", ",".join(eeg),
+                    "--ref", ",".join(refs),
+                    "--eog", ",".join(eog),
+                    "--emg", ",".join(emg),
                 ]
                 if out_dir:
                     cmd += ["--out-dir", out_dir]
-                if eeg:
-                    cmd += ["--eeg", ",".join(eeg)]
-                if refs:
-                    cmd += ["--ref", ",".join(refs)]
-                if eog:
-                    cmd += ["--eog", ",".join(eog)]
-                if emg:
-                    cmd += ["--emg", ",".join(emg)]
                 
                 env = os.environ.copy()
                 env["PYTHONPATH"] = str(cli_path.parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
