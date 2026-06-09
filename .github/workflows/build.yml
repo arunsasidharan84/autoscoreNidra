@@ -83,23 +83,23 @@ jobs:
 
       - name: Copy Python backend into macOS App bundle
         run: |
-          cp dist/autoscore-backend frontend/build/macos/Build/Products/Release/ScoringNidra.app/Contents/Resources/
+          cp dist/autoscore-backend frontend/build/macos/Build/Products/Release/autoscoreNidra.app/Contents/Resources/
 
       - name: Ad-hoc sign macOS app
-        run: codesign --force --deep --sign - frontend/build/macos/Build/Products/Release/ScoringNidra.app
+        run: codesign --force --deep --sign - frontend/build/macos/Build/Products/Release/autoscoreNidra.app
 
       - name: Package macOS app
         run: |
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent \
-            frontend/build/macos/Build/Products/Release/ScoringNidra.app \
-            dist/ScoringNidra-macos.zip
+            frontend/build/macos/Build/Products/Release/autoscoreNidra.app \
+            dist/autoscoreNidra-macos.zip
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScoringNidra-macos
-          path: dist/ScoringNidra-macos.zip
+          name: autoscoreNidra-macos
+          path: dist/autoscoreNidra-macos.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -184,8 +184,8 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScoringNidra-Installer
-          path: frontend/dist/ScoringNidra-Installer.exe
+          name: autoscoreNidra-Installer
+          path: frontend/dist/autoscoreNidra-Installer.exe
           if-no-files-found: error
           retention-days: 1
 
@@ -267,13 +267,13 @@ jobs:
       - name: Package Linux app
         run: |
           mkdir -p dist
-          tar -czf dist/ScoringNidra-linux.tar.gz -C frontend/build/linux/x64/release/bundle .
+          tar -czf dist/autoscoreNidra-linux.tar.gz -C frontend/build/linux/x64/release/bundle .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScoringNidra-linux
-          path: dist/ScoringNidra-linux.tar.gz
+          name: autoscoreNidra-linux
+          path: dist/autoscoreNidra-linux.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -286,19 +286,19 @@ jobs:
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: ScoringNidra-macos
+          name: autoscoreNidra-macos
           path: dist
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: ScoringNidra-Installer
+          name: autoscoreNidra-Installer
           path: dist
 
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: ScoringNidra-linux
+          name: autoscoreNidra-linux
           path: dist
 
       - name: Generate Release Tag & Name
@@ -322,9 +322,9 @@ jobs:
           name: ${{ steps.release_info.outputs.title }}
           prerelease: ${{ steps.release_info.outputs.prerelease == 'true' }}
           files: |
-            dist/ScoringNidra-macos.zip
-            dist/ScoringNidra-Installer.exe
-            dist/ScoringNidra-linux.tar.gz
+            dist/autoscoreNidra-macos.zip
+            dist/autoscoreNidra-Installer.exe
+            dist/autoscoreNidra-linux.tar.gz
           draft: false
           make_latest: ${{ steps.release_info.outputs.tag != 'latest' && 'true' || 'false' }}
         env:

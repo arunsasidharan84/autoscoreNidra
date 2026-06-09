@@ -8,9 +8,9 @@ autoscoreNidra is a cross-platform desktop application for automated sleep stagi
 
 No local setup of Python, PyTorch, or other runtime dependencies is required. The application is packaged as fully self-contained standalone desktop apps:
 
-*   **macOS (Universal ZIP)**: [Download for macOS](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/ScoringNidra-macos.zip)
-*   **Windows (x64 Installer EXE)**: [Download for Windows](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/ScoringNidra-Installer.exe)
-*   **Linux (x64 Tarball)**: [Download for Linux](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/ScoringNidra-linux.tar.gz)
+*   **macOS (Universal ZIP)**: [Download for macOS](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/autoscoreNidra-macos.zip)
+*   **Windows (x64 Installer EXE)**: [Download for Windows](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/autoscoreNidra-Installer.exe)
+*   **Linux (x64 Tarball)**: [Download for Linux](https://github.com/arunsasidharan84/autoscoreNidra/releases/download/latest/autoscoreNidra-linux.tar.gz)
 
 *(These links always point to the latest pre-built releases compiled automatically via GitHub Actions).*
 
@@ -19,9 +19,9 @@ Because the application is signed ad-hoc, you must clear the macOS Gatekeeper qu
 1. Open **Terminal** and navigate to your extracted app path.
 2. Run the following command:
    ```sh
-   xattr -rd com.apple.quarantine ScoringNidra.app
+   xattr -rd com.apple.quarantine autoscoreNidra.app
    ```
-3. Right-click `ScoringNidra.app` and choose **Open**.
+3. Right-click `autoscoreNidra.app` and choose **Open**.
 
 ## Architecture
 
