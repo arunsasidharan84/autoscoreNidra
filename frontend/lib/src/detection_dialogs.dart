@@ -818,6 +818,11 @@ class _AutoScoringDialogState extends State<AutoScoringDialog> {
                             DropdownMenuItem(value: 'usleep', child: Text('Offline U-Sleep Consensus', style: TextStyle(fontSize: 13))),
                             DropdownMenuItem(value: 'luna', child: Text('Luna POPS Stager', style: TextStyle(fontSize: 13))),
                             DropdownMenuItem(value: 'gssc', child: Text('Greifswald Classifier (GSSC)', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'tinysleepnet', child: Text('TinySleepNet (PhysioEx)', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'seqsleepnet', child: Text('SeqSleepNet (PhysioEx)', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'sleeptransformer', child: Text('SleepTransformer (PhysioEx)', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'dreamento', child: Text('Dreamento (YASA-based)', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'sleepeegpy', child: Text('SleepEEGpy (YASA-based)', style: TextStyle(fontSize: 13))),
                           ],
                           onChanged: (v) {
                             if (v != null) setState(() => _algorithm = v);
@@ -1032,7 +1037,35 @@ class _AutoScoringDialogState extends State<AutoScoringDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  for (final key in channels.keys) {
+                    channels[key] = false;
+                  }
+                });
+              },
+              child: const MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Text(
+                  'Clear',
+                  style: TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 4),
         Container(
           height: 110,
@@ -1065,6 +1098,208 @@ class _AutoScoringDialogState extends State<AutoScoringDialog> {
               },
             ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class BatchAutoScoringDialog extends StatefulWidget {
+  const BatchAutoScoringDialog({
+    super.key,
+    required this.files,
+    required this.onRun,
+  });
+
+  final List<String> files;
+  final void Function(Map<String, dynamic> settings) onRun;
+
+  @override
+  State<BatchAutoScoringDialog> createState() => _BatchAutoScoringDialogState();
+}
+
+class _BatchAutoScoringDialogState extends State<BatchAutoScoringDialog> {
+  String _algorithm = 'yasa';
+  String _correction = 'none';
+  double _sleepgptAlpha = 0.1;
+  int _sleepgptNgram = 30;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(Icons.auto_awesome_motion, color: Colors.purple),
+          const SizedBox(width: 8),
+          Text('Batch Automated Scoring (${widget.files.length} files)'),
+        ],
+      ),
+      content: SizedBox(
+        width: 500,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Scoring will run in the background for each selected file. '
+                'Channels will be automatically scanned and guessed for each file.',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              // Alg Selection
+              const Text(
+                'Base Scorer Algorithm',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                value: _algorithm,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'yasa', child: Text('YASA LightGBM Consensus', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'usleep', child: Text('Offline U-Sleep Consensus', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'luna', child: Text('Luna POPS Stager', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'gssc', child: Text('Greifswald Classifier (GSSC)', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'tinysleepnet', child: Text('TinySleepNet (PhysioEx)', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'seqsleepnet', child: Text('SeqSleepNet (PhysioEx)', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'sleeptransformer', child: Text('SleepTransformer (PhysioEx)', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'dreamento', child: Text('Dreamento (YASA-based)', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'sleepeegpy', child: Text('SleepEEGpy (YASA-based)', style: TextStyle(fontSize: 13))),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _algorithm = v);
+                },
+              ),
+              const SizedBox(height: 16),
+              // Correction Selection
+              const Text(
+                'Sequence Correction',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                value: _correction,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'none', child: Text('None (Raw consensus predictions)', style: TextStyle(fontSize: 13))),
+                  DropdownMenuItem(value: 'sleepgpt', child: Text('SleepGPT Language Model', style: TextStyle(fontSize: 13))),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _correction = v);
+                },
+              ),
+              const SizedBox(height: 16),
+
+              if (_correction == 'sleepgpt') ...[
+                Card(
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  color: Colors.purple.shade50,
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(color: Colors.purple.shade100),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'SleepGPT Sequence Parameters',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.purple),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Expanded(
+                              flex: 3,
+                              child: Text('Language model weight (alpha):', style: TextStyle(fontSize: 12)),
+                            ),
+                            SizedBox(
+                              width: 90,
+                              height: 32,
+                              child: TextFormField(
+                                initialValue: _sleepgptAlpha.toString(),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                style: const TextStyle(fontSize: 12),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.all(8),
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: (text) {
+                                  final d = double.tryParse(text);
+                                  if (d != null && d >= 0.0 && d <= 1.0) {
+                                    setState(() => _sleepgptAlpha = d);
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Expanded(
+                              flex: 3,
+                              child: Text('Context sequence length (n-gram):', style: TextStyle(fontSize: 12)),
+                            ),
+                            SizedBox(
+                              width: 90,
+                              height: 32,
+                              child: TextFormField(
+                                initialValue: _sleepgptNgram.toString(),
+                                keyboardType: TextInputType.number,
+                                style: const TextStyle(fontSize: 12),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.all(8),
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: (text) {
+                                  final val = int.tryParse(text);
+                                  if (val != null && val > 0) {
+                                    setState(() => _sleepgptNgram = val);
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            widget.onRun({
+              'algorithm': _algorithm,
+              'sequence_correction': _correction,
+              'sleepgpt_alpha': _sleepgptAlpha,
+              'sleepgpt_ngram': _sleepgptNgram,
+            });
+            Navigator.of(context).pop();
+          },
+          child: const Text('Run Batch Scoring'),
         ),
       ],
     );

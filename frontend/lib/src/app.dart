@@ -106,7 +106,10 @@ class _ScoringNidraHomeState extends State<ScoringNidraHome> {
       _setStatus('Open cancelled');
       return;
     }
+    await _openRecordingPath(path, kind: kind);
+  }
 
+  Future<void> _openRecordingPath(String path, {required String kind}) async {
     _setStatus('Loading ${_basename(path)} — computing spectrogram…');
     await Future.microtask(() {}); // let the UI update
 
@@ -722,6 +725,15 @@ class _ScoringNidraHomeState extends State<ScoringNidraHome> {
     var isDone = false;
     String? outputJsonPath;
 
+    final receivePort = ReceivePort();
+    receivePort.listen((message) {
+      if (message is String) {
+        logsController.add(message);
+        logLines.add(message);
+      }
+    });
+    final sendPort = receivePort.sendPort;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -784,26 +796,12 @@ class _ScoringNidraHomeState extends State<ScoringNidraHome> {
     Future.microtask(() async {
       _setStatus('Spawning automated sleep scoring backend…');
       try {
-        final result = await Isolate.run(() {
-          final backend = EegBackend();
-          var outPath = '';
-          final exitCode = backend.runCommandStream(
-            executable: executable,
-            arguments: args,
-            onLine: (line) {
-              logsController.add(line);
-              logLines.add(line);
-              
-              if (line.contains('Saved ScoringHero JSON:')) {
-                final match = RegExp(r'Saved ScoringHero JSON:\s*(.*)').firstMatch(line);
-                if (match != null) {
-                  outPath = match.group(1)!.trim();
-                }
-              }
-            },
-          );
-          return (exitCode, outPath);
-        });
+        final task = _AutoScoringTask(
+          executable: executable,
+          arguments: args,
+          sendPort: sendPort,
+        );
+        final result = await Isolate.run(task.run);
 
         isDone = true;
         final exitCode = result.$1;
@@ -885,8 +883,70 @@ class _ScoringNidraHomeState extends State<ScoringNidraHome> {
         }
       } finally {
         logsController.close();
+        receivePort.close();
       }
     });
+  }
+
+  Future<void> _runBatchAutoScoring() async {
+    _setStatus('Opening multi-EDF file picker…');
+    final result = await FilePicker.pickFiles(
+      dialogTitle: 'Select EDF files for Batch Auto-Scoring',
+      type: FileType.custom,
+      allowedExtensions: ['edf'],
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) {
+      _setStatus('Batch scoring cancelled');
+      return;
+    }
+
+    final files = result.files.map((f) => f.path).whereType<String>().toList();
+    if (files.isEmpty) {
+      _setStatus('No valid files selected');
+      return;
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (_) => BatchAutoScoringDialog(
+        files: files,
+        onRun: (settings) async {
+          _executeBatchAutoScoring(files, settings);
+        },
+      ),
+    );
+  }
+
+  void _executeBatchAutoScoring(List<String> files, Map<String, dynamic> settings) {
+    final algorithm = settings['algorithm'] as String;
+    final correction = settings['sequence_correction'] as String;
+    final alpha = (settings['sleepgpt_alpha'] as num?)?.toDouble() ?? 0.1;
+    final ngram = (settings['sleepgpt_ngram'] as num?)?.toInt() ?? 30;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return BatchProgressDialog(
+          files: files,
+          algorithm: algorithm,
+          correction: correction,
+          sleepgptAlpha: alpha,
+          sleepgptNgram: ngram,
+          onFinished: () {
+            _setStatus('Batch auto-scoring finished');
+            // If the active file was one of the scored files, reload it
+            final active = _activePath;
+            if (active != null && files.contains(active)) {
+              _openRecordingPath(active, kind: active.split('.').last.toLowerCase());
+            }
+          },
+        );
+      },
+    );
   }
 
   Future<void> _saveScoring() async {
@@ -3905,6 +3965,344 @@ class _ComparisonReportCardDialog extends StatelessWidget {
     if (score >= 60.0) return Colors.blue.shade700;
     if (score >= 40.0) return Colors.orange.shade700;
     return Colors.red.shade700;
+  }
+}
+
+class _AutoScoringTask {
+  final String executable;
+  final List<String> arguments;
+  final SendPort sendPort;
+
+  _AutoScoringTask({
+    required this.executable,
+    required this.arguments,
+    required this.sendPort,
+  });
+
+  (int, String) run() {
+    final backend = EegBackend();
+    var outPath = '';
+    final exitCode = backend.runCommandStream(
+      executable: executable,
+      arguments: arguments,
+      onLine: (line) {
+        sendPort.send(line);
+        if (line.contains('Saved ScoringHero JSON:')) {
+          final match = RegExp(r'Saved ScoringHero JSON:\s*(.*)').firstMatch(line);
+          if (match != null) {
+            outPath = match.group(1)!.trim();
+          }
+        }
+      },
+    );
+    return (exitCode, outPath);
+  }
+}
+
+class BatchProgressDialog extends StatefulWidget {
+  const BatchProgressDialog({
+    super.key,
+    required this.files,
+    required this.algorithm,
+    required this.correction,
+    required this.sleepgptAlpha,
+    required this.sleepgptNgram,
+    required this.onFinished,
+  });
+
+  final List<String> files;
+  final String algorithm;
+  final String correction;
+  final double sleepgptAlpha;
+  final int sleepgptNgram;
+  final void Function() onFinished;
+
+  @override
+  State<BatchProgressDialog> createState() => _BatchProgressDialogState();
+}
+
+class _BatchProgressDialogState extends State<BatchProgressDialog> {
+  final Map<String, String> _statuses = {};
+  final List<String> _logLines = [];
+  final StreamController<String> _logsStream = StreamController<String>();
+  String _currentFile = '';
+  int _currentIndex = 0;
+  bool _isFinished = false;
+  bool _isCancelled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final file in widget.files) {
+      _statuses[file] = 'Pending';
+    }
+    _startBatch();
+  }
+
+  @override
+  void dispose() {
+    _logsStream.close();
+    super.dispose();
+  }
+
+  Future<void> _startBatch() async {
+    final executable = detectBackendExecutable();
+    final script = detectBackendScript();
+
+    for (int i = 0; i < widget.files.length; i++) {
+      if (_isCancelled) break;
+
+      final file = widget.files[i];
+      if (!mounted) break;
+      setState(() {
+        _currentIndex = i;
+        _currentFile = file;
+        _statuses[file] = 'Scoring…';
+        _logLines.clear();
+        _logLines.add('--- Starting auto-scoring for ${_basename(file)} ---');
+      });
+      _logsStream.add('--- Starting auto-scoring for ${_basename(file)} ---');
+
+      final args = <String>[];
+      if (executable.endsWith('.py') || script.isNotEmpty && (executable.contains('python') || executable.contains('python3'))) {
+        if (script.isNotEmpty) {
+          args.add(script);
+        }
+      }
+      args.add(file);
+      args.addAll(['--algorithm', widget.algorithm]);
+      args.addAll(['--sequence-correction', widget.correction]);
+
+      if (widget.correction == 'sleepgpt') {
+        args.addAll(['--sleepgpt-alpha', widget.sleepgptAlpha.toString()]);
+        args.addAll(['--sleepgpt-ngram', widget.sleepgptNgram.toString()]);
+      }
+
+      final receivePort = ReceivePort();
+      final sendPort = receivePort.sendPort;
+
+      final streamSubscription = receivePort.listen((message) {
+        if (message is String) {
+          if (mounted) {
+            setState(() {
+              _logLines.add(message);
+            });
+            _logsStream.add(message);
+          }
+        }
+      });
+
+      try {
+        final task = _AutoScoringTask(
+          executable: executable,
+          arguments: args,
+          sendPort: sendPort,
+        );
+        final result = await Isolate.run(task.run);
+        final exitCode = result.$1;
+        final outputJsonPath = result.$2;
+
+        if (exitCode == 0 && outputJsonPath.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _statuses[file] = 'Completed';
+              _logLines.add('\nScoring finished successfully! Output saved to: $outputJsonPath');
+            });
+            _logsStream.add('\nScoring finished successfully! Output saved to: $outputJsonPath');
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _statuses[file] = 'Failed';
+              _logLines.add('\nScoring failed with exit code $exitCode');
+            });
+            _logsStream.add('\nScoring failed with exit code $exitCode');
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _statuses[file] = 'Failed';
+            _logLines.add('\nException occurred: $e');
+          });
+          _logsStream.add('\nException occurred: $e');
+        }
+      } finally {
+        await streamSubscription.cancel();
+        receivePort.close();
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isFinished = true;
+      });
+    }
+  }
+
+  String _basename(String path) {
+    return path.split(Platform.pathSeparator).last;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(Icons.auto_awesome_motion, color: Colors.purple),
+          const SizedBox(width: 8),
+          Text(_isFinished ? 'Batch Scoring Finished' : 'Running Batch Auto-Scoring…'),
+        ],
+      ),
+      content: SizedBox(
+        width: 800,
+        height: 500,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Left column: list of files
+            Expanded(
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border(right: BorderSide(color: Colors.grey.shade300)),
+                ),
+                padding: const EdgeInsets.only(right: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Files Queue (${_currentIndex + 1}/${widget.files.length})',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: widget.files.length,
+                        itemBuilder: (context, index) {
+                          final file = widget.files[index];
+                          final status = _statuses[file] ?? 'Pending';
+                          IconData icon = Icons.hourglass_empty;
+                          Color color = Colors.grey;
+
+                          if (status == 'Scoring…') {
+                            icon = Icons.sync;
+                            color = Colors.blue;
+                          } else if (status == 'Completed') {
+                            icon = Icons.check_circle;
+                            color = Colors.green;
+                          } else if (status == 'Failed') {
+                            icon = Icons.error;
+                            color = Colors.red;
+                          }
+
+                          final isCurrent = file == _currentFile;
+                          return Container(
+                            color: isCurrent ? Colors.purple.shade50 : null,
+                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                            child: Row(
+                              children: [
+                                Icon(icon, size: 16, color: color),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _basename(file),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        status,
+                                        style: TextStyle(fontSize: 10, color: color),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Right column: terminal logs
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Active Logs',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      color: Colors.black87,
+                      width: double.infinity,
+                      child: StreamBuilder<String>(
+                        stream: _logsStream.stream,
+                        builder: (context, snapshot) {
+                          return Scrollbar(
+                            thumbVisibility: true,
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: _logLines.length,
+                              itemBuilder: (context, index) {
+                                return Text(
+                                  _logLines[index],
+                                  style: const TextStyle(
+                                    color: Colors.lightGreenAccent,
+                                    fontFamily: 'Courier',
+                                    fontSize: 11,
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (!_isFinished)
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _isCancelled = true;
+              });
+              Navigator.of(context).pop();
+            },
+            child: const Text('Cancel Batch', style: TextStyle(color: Colors.red)),
+          ),
+        TextButton(
+          onPressed: _isFinished
+              ? () {
+                  Navigator.of(context).pop();
+                  widget.onFinished();
+                }
+              : null,
+          child: Text(_isFinished ? 'Close' : 'Processing…'),
+        ),
+      ],
+    );
   }
 }
 
